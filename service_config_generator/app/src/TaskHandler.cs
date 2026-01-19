@@ -1,114 +1,50 @@
-using System;
-using System.Collections.Concurrent;
-using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
-using Newtonsoft.Json;
 
 namespace ServiceConfigGenerator.src
 {
     public class TaskHandler
     {
-        public readonly static string defaultServiceTasksBeginning = """
-            ### BOILER PLATE ###
-            - name: Creates remote docker projects directory
-            ansible.builtin.file:
-                path: '{{docker_dir}}'
-                state: directory
 
-            - name: Update local docker directory name variable
-            ansible.builtin.set_fact:
-                stack_dir: "{{ [docker_dir, project_name] | join('/') }}"
-
-            - name: Creates remote project directory
-            file:
-                path: '{{stack_dir}}'
-                state: directory
-
-            - name: Transfer and convert the docker compose jinja2 template
-            ansible.builtin.template:
-                src: "compose.yml"
-                dest: "{{stack_dir}}/compose.yml"
-
-            ### MAIN ###
-
-        """;
-
-        public readonly static string defaultServiceTasksEnd = """
-        
-            ### DEPLOY ###
-            - name: Deploy Docker Compose Stack
-            community.docker.docker_compose_v2:
-                project_name: '{{project_name}}'
-                project_src: '{{stack_dir}}'
-                files:
-                - compose.yml
-        """;
-
-        public static void JinjaTemplatesCheck(Dictionary<string,string> templatesRemoteRelativePaths)
+        public static string LocalDevPathsCheck(string localRoleDirPath, string localHostVarsDirPath)
         {
-            // --- template remote paths validate
-            // foreach (KeyValuePair<string, string> templateTarget in config.TemplatesRemoteRelativePaths)
-            // {
-            //     if (templateTarget.Key == "" || File.Exists(dataDirPath + "/templates/" + templateTarget.Key) == false)
-            //     {
-            //         throw new Exception("Config Validator Error: Template remote paths key invalid.");
-            //     }
-            //     if (templateTarget.Value == "" || templateTarget.Value.StartsWith(baseDirectoriesPath) == false)
-            //     {
-            //         throw new Exception("Config Validator Error: Template remote paths value invalid.");
-            //     }
-            // }
+            return "";
         }
 
-        public static void JinjaTemplatesCopy(string templateNameToCopy, string remoteTemplateDestination)
+        public static string FilesCheck(Config config, string dataDirPath)
         {
-            string copyTemplateFileTask = """
-                - name: Transfer and convert the docker compose jinja2 template
-                ansible.builtin.template:
-                    src: "compose.yml"
-                    dest: "{{stack_dir}}/compose.yml"
-            """;
-            Console.WriteLine(copyTemplateFileTask);
+            List<string> errors = new List<string>();
+
+            // --- remote paths validate, key is local file name, value is remote relative path in project
+            string[] currentFilePathsCheck = ["templates", "files"];
+            Dictionary<string, string>[] currentFilePathsDictionary = [config.TemplatesRemoteRelativePaths, config.FilesRemoteRelativePaths];
+            for (int index = 0; index < 2; index++)
+            {
+                foreach (KeyValuePair<string, string> currentFilePaths in currentFilePathsDictionary[index])
+                {
+                    string expectedFileToExist = dataDirPath + $"/{currentFilePathsCheck[index]}/" + currentFilePaths.Key;
+                    if (string.IsNullOrEmpty(currentFilePaths.Key) || File.Exists(expectedFileToExist) == false)
+                    {
+                        errors.Add("Tool Data Error: Remote paths key empty or template does not exist at the expected path.");
+                        errors.Add($"Problem Dir: {currentFilePathsCheck[index]}");
+                        errors.Add($"Problem File (Expected to exist): {currentFilePaths.Key}");
+                    }
+                    string baseRemotePath = "/home/ansible/docker/" + config.ProjectName;
+                    if (string.IsNullOrEmpty(currentFilePaths.Value) || currentFilePaths.Value.StartsWith(baseRemotePath))
+                    {
+                        errors.Add("Tool Data Error: Template remote paths value invalid, null or empty value or remote path is not relative to the project.");
+                    }
+                }
+            }
+
+            string report = Helpers.CheckReport(errors, false);
+            return report;
         }
 
-        public static void FilesCheck()
+        public static string DirectoriesCheck(Config config, string dataDirPath, string userChoice = "")
         {
-            // string[] expectedFiles = ["compose.yml", "config.json"];
-            // foreach (string file in expectedFiles)
-            // {
-            //     string currentFile = dataDirPath + "/" + file;
-            //     if (File.Exists(currentFile) == false)
-            //     {
-            //         throw new Exception("Tool Data Error: '" + currentFile + "' file does not exist");
-            //     }
-            // }
-            // foreach (KeyValuePair<string, string> templateTarget in config.FilesRemoteRelativePaths)
-            // {
-            //     if (templateTarget.Key == "" || File.Exists(dataDirPath + "/files/" + templateTarget.Key) == false)
-            //     {
-            //         throw new Exception("Config Validator Error: File remote paths key invalid.");
-            //     }
-            //     if (templateTarget.Value == "" || templateTarget.Value.StartsWith(baseDirectoriesPath) == false)
-            //     {
-            //         throw new Exception("Config Validator Error: File remote paths value invalid.");
-            //     }
-            // }
-        }
+            List<string> errors = new List<string>();
 
-        public static void FilesCopy(string fileNameToCopy, string remoteFileDestination)
-        {
-            string copyRegularFileTask = """
-                - name: Copy file
-                ansible.builtin.copy:
-                    src: "compose.yml"
-                    dest: "{{stack_dir}}/compose.yml"
-            """;
-            Console.WriteLine(copyRegularFileTask);
-
-        }
-
-        public static void DirectoriesCheck(Config config, string dataDirPath, string userChoice = "")
-        {
             List<string> expectedDirectories = new List<string>();
             if (config.TemplatesRemoteRelativePaths.Count > 0)
             {
@@ -125,33 +61,41 @@ namespace ServiceConfigGenerator.src
                     string currentDir = dataDirPath + "/" + dir;
                     if (Directory.Exists(currentDir) == false)
                     {
-                        throw new Exception("Tool Data Error: '" + currentDir + "' directory does not exist");
+                        errors.Add("Tool Data Error: '" + currentDir + "' directory does not exist");
                     }
                 }
             }
 
             foreach (string dir in config.DirectoriesToCreate)
             {
-                //FIXME: _ is not shady
-                string shadyPathCharactersPattern = "[^a-zA-Z0-9/]"; // matches chars not here
+                string shadyPathCharactersPattern = "[^a-zA-Z0-9/_-]"; // matches chars not here
                 if (Regex.IsMatch(dir, shadyPathCharactersPattern))
                 {
                     string promptP1 = "This directory to create has suspicious characters: " + dir;
-                    string promptP2 = "Do you wish to preceed (yes) or go back and edit the path (No): ";
+                    string promptP2 = "Do you wish to preceed (y) or go back and edit the path (N): ";
                     string prompt = promptP1 + "\n" + promptP2;
-                    userChoice = Program.ReadConsoleInput(userChoice, prompt);
                     bool userInputProcess = true;
-                    while (userInputProcess == true)
+                    int loopHardLimit = 100;
+                    int count = 0;
+                    while (userInputProcess == true && count < loopHardLimit)
                     {
+                        userChoice = Helpers.ReadConsoleInput(userChoice, prompt);
                         if (userChoice == "y" || userChoice == "Y")
                         {
                             userInputProcess = false;
                         }
                         else if (userChoice == "n" || userChoice == "N")
                         {
-                            throw new Exception("Tool Data Error: invalid directory to create");
+                            errors.Add("Tool Data Error: invalid directory to create");
+                            userInputProcess = false;
                         }
                         else Console.WriteLine("Invalid input: please input y or n");
+                        count++;
+                    }
+                    if (count == 100)
+                    {
+                        Console.WriteLine("TaskHandler: Looped to many times trying to read console input.");
+                        Environment.Exit(1);
                     }
                 }
             }
@@ -163,22 +107,120 @@ namespace ServiceConfigGenerator.src
                 {
                     if (dir.StartsWith(parentDir))
                     {
-                        throw new Exception("Tool Data Error: directories to create should relative in the project directory");
+                        errors.Add("Tool Data Error: directories to create should relative in the project directory");
                     }
                 }
             }
+
+            string report = Helpers.CheckReport(errors, false);
+            return report;
+
         }
 
-        public static void DirectoriesCreate(string directoryRelativePath)
+        public static string FileOpTaskGenerate(string specificTask, string srcFileName, string relativeRemoteDestination)
         {
-            string remotePath = "'{{stack_dir}}" + directoryRelativePath + "'";
-            string createDirectoryTask = $$"""
-                - name: Creates remote project directory
-                file:
-                    path: {{remotePath}}
-                    state: directory
+            string remotePath = "{{stack_dir}}/" + relativeRemoteDestination;
+            string fileOpTask = $$"""
+            - name: Copy a file to a remote loc (and render if template)
+              ansible.builtin.{{specificTask}}:
+                src: "{{srcFileName}}"
+                dest: "{{remotePath}}"
             """;
-            Console.WriteLine(createDirectoryTask);
+            return fileOpTask;
+        }
+
+        public static string DirectoriesCreateTaskGenerate(string directoryRelativePath)
+        {
+            string remotePath = "'{{stack_dir}}/" + directoryRelativePath + "'";
+            string createDirectoryTask = $$"""
+            - name: Creates remote project directory
+              ansible.builtin.file:
+                path: {{remotePath}}
+                state: directory
+            """;
+            return createDirectoryTask;
+        }
+
+        public static string TasksFileGenerate(Config config, string dataDirPath)
+        {
+            if(File.Exists(dataDirPath + "/tasks.yaml"))
+            {
+                string taskFileContents = File.ReadAllText(dataDirPath + "/tasks.yaml");
+                return taskFileContents;
+            }
+
+            string defaultServiceTasksBeginning = """
+            ### BOILER PLATE ###
+            - name: Creates remote docker projects directory
+              ansible.builtin.file:
+                path: '{{docker_dir}}'
+                state: directory
+
+            - name: Update local docker directory name variable
+              ansible.builtin.set_fact:
+                stack_dir: "{{ [docker_dir, project_name] | join('/') }}"
+
+            - name: Creates remote project directory
+              ansible.builtin.file:
+                path: '{{stack_dir}}'
+                state: directory
+
+            - name: Transfer and convert the docker compose jinja2 template
+              ansible.builtin.template:
+                src: "compose.yml"
+                dest: "{{stack_dir}}/compose.yml"
+
+            ### MAIN ###
+            """;
+
+            string defaultServiceTasksEnd = """
+            ### DEPLOY ###
+            - name: Deploy Docker Compose Stack
+              community.docker.docker_compose_v2:
+                project_name: '{{project_name}}'
+                project_src: '{{stack_dir}}'
+                files:
+                - compose.yml
+            """;
+
+            StringBuilder stringBuilder = new StringBuilder();
+            stringBuilder.AppendLine(defaultServiceTasksBeginning);
+            string currentTask = "";
+            foreach (string dir in config.DirectoriesToCreate)
+            {
+                currentTask = DirectoriesCreateTaskGenerate(dir);
+                stringBuilder.Append(currentTask);
+                stringBuilder.AppendLine("\n");
+            }
+            foreach (KeyValuePair<string, string> templateTask in config.TemplatesRemoteRelativePaths)
+            {
+                currentTask = FileOpTaskGenerate("template", templateTask.Key, templateTask.Value);
+                stringBuilder.Append(currentTask);
+                stringBuilder.AppendLine("\n");
+            }
+            foreach (KeyValuePair<string, string> copyTask in config.FilesRemoteRelativePaths)
+            {
+                currentTask = FileOpTaskGenerate("copy", copyTask.Key, copyTask.Value);
+                stringBuilder.Append(currentTask);
+                stringBuilder.AppendLine("\n");
+            }
+            string configTasksDirPath = dataDirPath + "/tasks";
+            if(File.Exists(configTasksDirPath + "/main.yaml"))
+            {
+                string configMainTasks = File.ReadAllText(configTasksDirPath + "/main.yaml");
+                stringBuilder.Append(configMainTasks);
+                stringBuilder.AppendLine("\n");
+            }
+            stringBuilder.AppendLine(defaultServiceTasksEnd);
+            stringBuilder.AppendLine("\n");
+            if(File.Exists(configTasksDirPath + "/post_deploy.yaml"))
+            {
+                string configPostDeployTasks = File.ReadAllText(configTasksDirPath + "/post_deploy.yaml");
+                stringBuilder.Append(configPostDeployTasks);
+                stringBuilder.AppendLine("\n");
+            }
+            string ansibleTasks = stringBuilder.ToString();
+            return ansibleTasks;
         }
     }
 }

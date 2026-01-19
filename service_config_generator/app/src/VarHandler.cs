@@ -1,162 +1,130 @@
-using System;
-using System.Collections.Concurrent;
-using System.IO;
-using Newtonsoft.Json;
+using System.Text;
 
 namespace ServiceConfigGenerator.src
 {
     public class VarHandler
     {
-        public readonly static string defaultServiceVars = """
-            docker_dir: "/home/ansible/docker"
-            project_name: "searxng"
-            domain: ""
-
-            network_backend:
-            name: ""
-            ipam_options:
-            - subnet: ""
-                gateway: ""
-            traefik_ips:
-                traefik: "172.80.2.2"
-                searxng: "172.80.2.3"
-        """;
-
-        public readonly static string defaultHostServiceVars = """
-            cloud_searxng:
-            name: "searxng"
-            domain: "searxng.cloud.nerolab.dev"
-            network_backend:
-                name: "t3_searxng"
-                ipam_options:
-                - subnet: "10.110.31.0/29"
-                gateway: "10.110.31.1"
-                traefik_ips:
-                traefik: "10.110.31.3"
-                searxng: "10.110.31.5"
-        """;
-
-        public readonly static string defaultHostNetworkVars = """
-            cloud_networks:
-            shared:
-            # traefik tailscale
-                - name: "traefik_tailscale"
-                ipam_options:
-                - subnet: "10.110.0.0/29"
-                    gateway: "10.110.0.1"
-                traefik_ip: "10.110.0.2"
-                tailscale_ip: "10.110.0.4"
-                dns_ip: "10.110.0.5"
-            # monitor center
-                - name: "{{cloud_monitor_center.network_backend.name}}"
-                ipam_options: "{{cloud_monitor_center.network_backend.ipam_options}}"
-                traefik_ip: "{{cloud_monitor_center.network_backend.ips.traefik}}"
-                tailscale_ip: "{{cloud_monitor_center.network_backend.ips.tailscale}}"
-            traefik_specific: # these containers don't have Tailscale DNS and connection-ability
-            # searxng
-                - name: "{{cloud_searxng.network_backend.name}}"
-                ipam_options: "{{cloud_searxng.network_backend.ipam_options}}"
-                traefik_ip: "{{cloud_searxng.network_backend.traefik_ips.traefik}}"
-            # vikunja
-                - name: "{{cloud_vikunja.network_backend.name}}"
-                ipam_options: "{{cloud_vikunja.network_backend.ipam_options}}"
-                traefik_ip: "{{cloud_vikunja.network_backend.traefik_ips.traefik}}"
-            # expenseowl
-                - name: "{{cloud_expenseowl.network_backend.name}}"
-                ipam_options: "{{cloud_expenseowl.network_backend.ipam_options}}"
-                traefik_ip: "{{cloud_expenseowl.network_backend.traefik_ips.traefik}}"
-            # edgeshark
-                - name: "{{cloud_edgeshark.network_backend.name}}"
-                ipam_options: "{{cloud_edgeshark.network_backend.ipam_options}}"
-                traefik_ip: "{{cloud_edgeshark.network_backend.traefik_ips.traefik}}"
-            tailscale_specific: ""
-        """;
-
-        public readonly static string defaultHostUserGateVars = """
-            gate_traefik_instances:
-            cloud:
-                traefik_ip: 10.110.0.2
-                domains_list:
-                - name: traefik.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: nextcloud.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: searxng.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                    - 100.122.229.69 # starfief-windows
-                - name: vikunja.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                    - 100.122.229.69 # starfief-windows
-                - name: expenseowl.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                    - 100.122.229.69 # starfief-windows
-                - name: grafana.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: loki.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: alloy.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: edgeshark.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: cadvisor.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: mimir.cloud.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-            media:
-                traefik_ip: 10.130.0.2
-                domains_list:
-                - name: traefik.media.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                - name: searxng.media.nerolab.dev
-                    allowed_tailscale_client_ips:
-                    - 100.93.170.126 # stardom
-                    - 100.122.229.69 # starfief-windows
-        """;
-
-        public static void AnsibleVarsCheck()
+        public static string NetworkSetupCheck(string networkSetup, string hostVarFilePath)
         {
-            // if (config.ProjectName == "" || config.ProjectName.Contains(' '))
-            // {
-            //     throw new Exception("Config Validator Error: Project name invalid.");
-            // }
+            List<string> errors = new List<string>();
+            string[] validNetSetups = ["t3_only", "ts_only", "shared", "none"];
+            bool isValidSetup = false;
+            foreach (string validNetSetup in validNetSetups)
+            {
+                if (string.Equals(validNetSetup, networkSetup))
+                {
+                    isValidSetup = true;
+                    break;
+                }
+            }
+            if (isValidSetup == false)
+            {
+                errors.Add("Tool Data Error: Invalid network setup provided.");
+            }
 
-            // string[] networkSetups = ["traefik_only", "tailscale_only", "shared"];
-            // bool netSetupValid = false;
-            // foreach (string netSetup in networkSetups)
-            // {
-            //     if (netSetup == config.NetworkSetup) netSetupValid = true;
-            // }
-            // if (netSetupValid == false)
-            // {
-            //     throw new Exception("Config Validator Error: NetworkSetup invalid.");
-            // }
+            string report = Helpers.CheckReport(errors, false);
+            return report;
         }
 
-        public static void AnsibleVarsInsert()
+        public static string NetworksHostVarGenerate(string networkType, string serviceName)
         {
-            //
+            // types: ts_only, t3_only, shared, none
+            if(string.Equals(networkType,"none"))
+            {
+                return "";
+            }
+            StringBuilder stringBuilder = new StringBuilder();
+            string postCommentSpaces = "    ";
+            string postNameSpaces = "      ";
+            string networkBackend = "\"{{" + $"{serviceName}.network_backend.";
+            stringBuilder.Append($"  # {serviceName}\n");
+            stringBuilder.Append(postCommentSpaces + "- name: " + networkBackend + "name" + "}}\"\n");
+            stringBuilder.Append(postNameSpaces + "ipam_options: " + networkBackend + "ipam_options" + "}}\"\n");
+            if (string.Equals(networkType, "t3_only"))
+            {
+                stringBuilder.Append(postNameSpaces + "traefik_ip: " + networkBackend + "traefik_ips.traefik" + "}}\"");
+            }
+            if (string.Equals(networkType, "ts_only"))
+            {
+                stringBuilder.Append(postNameSpaces + "tailscale_ip: " + networkBackend + "tailscale_ips.tailscale" + "}}\"");
+            }
+            if (string.Equals(networkType, "shared"))
+            {
+                stringBuilder.Append(postNameSpaces + "traefik_ip: " + networkBackend + "ips.traefik" + "}}\"\n");
+                stringBuilder.Append(postNameSpaces + "tailscale_ip: " + networkBackend + "ips.tailscale" + "}}\"");
+            }
+            string generatedContent = stringBuilder.ToString();
+            return generatedContent;
         }
 
-        public static void ComposeCheck()
+        // return key: host name - will be used to search file to place the entry contents
+        // return value: file entry block - per container instance
+        public static Dictionary<string,string> UserGateEntryHostVarGenerate(Dictionary<string, Dictionary<string,List<string>>> entryDetails)
         {
-            //
+            Dictionary<string, string> userGateEntries = new Dictionary<string, string>();
+            StringBuilder stringBuilder = new StringBuilder();
+            for (int hostIndex = 0; hostIndex < entryDetails.Count; hostIndex++)
+            {
+                string currentHostName = entryDetails.ElementAt(hostIndex).Key;
+                Dictionary<string,List<string>> currentHostEntryDetails = entryDetails.ElementAt(hostIndex).Value;
+                for (int index = 0; index < currentHostEntryDetails.Count; index++)
+                {
+                    KeyValuePair<string,List<string>> currentPairContainerInstanceEntryDetails = currentHostEntryDetails.ElementAt(index);
+                    string containerInstanceDomainPrefix = currentPairContainerInstanceEntryDetails.Key;
+                    List<string> containerInstanceAllowedIps = currentPairContainerInstanceEntryDetails.Value;
+                    string entryPrefix = $"""
+                        - name: {containerInstanceDomainPrefix}.{currentHostName}.wiresndreams.dev
+                          allowed_tailscale_client_ips:
+                    """;
+                    stringBuilder.AppendLine(entryPrefix);
+                    foreach (string ipListing in containerInstanceAllowedIps)
+                    {
+                        stringBuilder.Append("        - " + ipListing);
+                        stringBuilder.Append('\n');
+                    }
+                }
+                string hostEntry = stringBuilder.ToString().TrimEnd('\n'); // entry is one container instance block
+                userGateEntries.Add(currentHostName, hostEntry);
+                stringBuilder.Clear(); 
+            }
+            return userGateEntries;
         }
 
-        public static void ComposeCopy()
+        public static Dictionary<string, string> UserGateFileInsertsGenerate(Config config, string dataDirPath)
         {
-            //
+            Dictionary<string,string> fileInserts = new Dictionary<string, string>{};
+            Dictionary<string,string> userGateVar = UserGateEntryHostVarGenerate(config.UserGateDetails);
+            foreach(KeyValuePair<string,string> UserGateEntry in userGateVar)
+            {
+                string search = $"    domains_list: # {UserGateEntry.Key}";
+                string entry = UserGateEntry.Value;
+                fileInserts.Add(search, entry);
+            }
+            return fileInserts;
+        }
+
+        //NOTE: directories for ansible not made here is required done beforehand
+        // already existing file conflicts also not handled here
+        public static Dictionary<string, string> NetworkSetupHostVarFileInsertsGenerate(Config config, string dataDirPath, string host)
+        {
+            Dictionary<string, string> fileInserts = new Dictionary<string, string>();
+            string networkSetupVar = NetworksHostVarGenerate(config.NetworkSetup, config.ProjectName);
+            switch (config.NetworkSetup)
+            {
+                case "shared":
+                    string search = "  shared:";
+                    fileInserts.Add(search, networkSetupVar);
+                    break;
+                case "t3_only":
+                    search = "  traefik_specific: # these containers don't have Tailscale DNS and connection-ability";
+                    fileInserts.Add(search, networkSetupVar);
+                    break;
+                case "tailscale_only":
+                    search = "  tailscale_specific: # these containers are not reachable via Traefik";
+                    fileInserts.Add(search, networkSetupVar);
+                    break;
+            }
+            return fileInserts;
         }
 
     }

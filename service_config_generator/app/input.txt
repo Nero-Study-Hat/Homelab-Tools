@@ -1,0 +1,2 @@
+/home/nero/Workspace/Tech/IT/Homelab/ansible/roles_data
+/mnt/nero-priv-data/Workspace/Tech/Dev/Major/Homelab-Tools/service_config_generator/tests/headless-run-test
