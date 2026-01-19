@@ -1,0 +1,15 @@
+docker_dir: "/home/ansible/docker"
+
+# Tailscale Config for the below.
+
+# autoApprovers routes
+# "10.110.0.0/29": ["tag:day-server"], // traefik
+# "10.110.1.0/29": ["tag:day-server"], // dns
+# "10.110.20.0/28": ["tag:day-server"], // monitor-center
+
+# hosts
+# "day-traefik-net": "10.110.0.0/29",
+# "day-dns-net": "10.110.1.0/29",
+
+# "day-traefik": "10.110.0.2",
+# "day-dns": "10.110.1.4",
