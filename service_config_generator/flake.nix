@@ -1,7 +1,7 @@
 {
 	description = "My Homelab IaC dev environment.";
 	inputs = {
-		nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+		nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05"; # "github:NixOS/nixpkgs/nixos-unstable"
 		flake-utils.url = "github:numtide/flake-utils";
 	};
 
