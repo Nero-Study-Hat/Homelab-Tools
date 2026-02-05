@@ -1,3 +1,12 @@
+Host Vars File
+
+```yaml
+docker_dir: "/home/ansible/docker"
+```
+
+Service Tasks File
+
+```yaml
 ### BOILER PLATE ###
 - name: Creates remote docker projects directory
   ansible.builtin.file:
@@ -28,3 +37,4 @@
     project_src: '{{stack_dir}}'
     files:
     - compose.yml
+```
